@@ -1,0 +1,6 @@
+**/.vscode
+**/.vs
+*.bat
+*test*
+/data
+/ignore
