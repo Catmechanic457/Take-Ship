@@ -12,8 +12,7 @@ namespace game {
     class Stage : public noise::Noise {
         private:
         rs::Vector2<unsigned> _win;
-        rs::Vector2<unsigned> _sp;
-
+        
         noise::Settings _settings;
 
         unsigned _win_max = _win.x > _win.y ? _win.x : _win.y;
@@ -39,7 +38,7 @@ namespace game {
 
         public:
 
-        Stage(rs::Vector2<unsigned> size_, noise::Settings settings_) : noise::Noise(), _win(size_), _sp(size_.x/2, size_.y/2), _settings(settings_) {}
+        Stage(rs::Vector2<unsigned> size_, noise::Settings settings_) : noise::Noise(), _win(size_), _settings(settings_) {}
         Stage(unsigned sizex_, unsigned sizey_, noise::Settings settings_) : Stage(rs::Vector2<unsigned>(sizex_, sizey_), settings_) {}
 
         /**
@@ -169,32 +168,20 @@ namespace game {
             return false;
         }
         /**
-         * \return The stage spawnpoint (located at the centre)
-        */
-        const rs::Vector2<unsigned>& spawn_point() const {return _sp;}
-        /**
          * \return The stage size
         */
-        const rs::Vector2<unsigned>& stage_size() const {return _win;}
+        const rs::Vector2<unsigned>& get_stage_size() const {return _win;}
+        /**
+         * \brief Set the stage size
+        */
+        void set_stage_size(rs::Vector2<unsigned> size_) {_win = size_;}
+        /**
+         * \brief Set the stage size
+        */
+        void set_stage_size(unsigned x_, unsigned y_) {_win.x = x_; _win.y = y_;}
     };
 
     class Island : public Stage {
-
-        // define grass layer
-        const double grass_layer_offset = 0.05;
-
-        // define minimum steepness to draw a cliff
-        const double cliff_threshold = 0.20;
-
-        // height scale for visual details
-        const double visual_height_multiplier = 100.0;
-
-        const sf::Color grass = sf::Color(140, 200, 65);
-        const sf::Color dirt = sf::Color(180, 130, 50);
-        const sf::Color cliff = sf::Color(185, 180, 165);
-        const sf::Color sand = sf::Color(255, 200, 120);
-        const sf::Color water_shallow = sf::Color(55, 170, 165);
-        const sf::Color water_deep = sf::Color(50, 70, 155);
 
         /**
          * \param x_
@@ -262,6 +249,22 @@ namespace game {
         }
 
         public:
+
+        // define grass layer
+        double grass_layer_offset = 0.05;
+
+        // define minimum steepness to draw a cliff
+        double cliff_threshold = 0.20;
+
+        // height scale for visual details
+        double visual_height_multiplier = 100.0;
+
+        sf::Color grass = sf::Color(140, 200, 65);
+        sf::Color dirt = sf::Color(180, 130, 50);
+        sf::Color cliff = sf::Color(185, 180, 165);
+        sf::Color sand = sf::Color(255, 200, 120);
+        sf::Color water_shallow = sf::Color(55, 170, 165);
+        sf::Color water_deep = sf::Color(50, 70, 155);
 
         // direction of incoming light (from the sun)
         const std::vector<double> light_direction = render::normalize(std::vector<double>{2.0,2.0, -1});
@@ -362,7 +365,7 @@ namespace game {
             default: throw;
             }
         }
-        rs::Vector2<unsigned> render_domain() override {return stage_size();}
+        rs::Vector2<unsigned> render_domain() override {return get_stage_size();}
         unsigned layer_count() override {return 2U;}
         render::RenderContext render_context() override {
             render::RenderContext context;
@@ -462,6 +465,15 @@ namespace game {
         
         ForestGenerator(render::Scene& scene_, noise::Settings settings_ = ForestDefault) :
         scene(scene_), settings(settings_) {}
+        /**
+         * \brief Set the generation settings
+         * \param s_ New settings object
+        */
+        void set_settings(noise::Settings s_) {settings = s_;}
+        /**
+         * \returns The generation settings as a non-const reference
+        */
+        noise::Settings& get_settings() {return settings;}
         /**
          * \brief Generate a forest and append the entities to the scene
          * \param max_count_ The maximum possible trees to generate. The fraction of trees that
