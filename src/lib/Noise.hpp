@@ -3,6 +3,13 @@
 
 #include "PerlinNoise.hpp"
 
+#include <string.h>
+#include <fstream>
+#include <json/json.h>
+
+#include <iostream>
+
+
 namespace noise {
     class Noise : private siv::PerlinNoise {
         unsigned _seed;
@@ -34,8 +41,39 @@ namespace noise {
         double frequency;
         unsigned octaves;
         double threshold;
+        constexpr Settings() : Settings(0.0,0,0.0) {}
         constexpr Settings(double frequency_, unsigned octaves_, double threshold_) : 
         frequency(frequency_), octaves(octaves_), threshold(threshold_) {}
+        void load_from_path(std::string path_) {
+            Json::Value file;
+            std::ifstream values_file(path_, std::ifstream::binary);
+            if (values_file.good()) {
+                values_file >> file;
+            }
+            load_json(file["noise_parameters"]);
+        }
+        void load_json(Json::Value file_) {
+
+            std::string format = file_["format"].asString();
+
+            Json::Value data_ = file_["data"];
+
+            // only "simple" format implemented
+            // "format" key in place only for future-proofing
+
+            if (format == "simple") {
+                frequency = data_["frequency"].asDouble();
+                octaves = data_["octaves"].asUInt();
+                threshold = data_["threshold"].asDouble();
+                return;
+            }
+            if (format == "path") {
+                load_from_path(data_["path"].asString());
+                return;
+            }
+
+            std::cout << "Invalid Format!" << std::endl;
+        }
     };
 }
 

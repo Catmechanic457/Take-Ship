@@ -2,5 +2,4 @@
 **/.vs
 *.bat
 *test*
-/data
 /ignore

@@ -1,0 +1,50 @@
+{
+    "stage": {
+        "size": {
+            "x": 1000,
+            "y": 1000
+        },
+        "noise_parameters": {
+            "format": "simple",
+            "data": {
+                "frequency": 4.0,
+                "octaves": 4,
+                "threshold": 0.55
+            }
+        }
+    },
+
+    "island": {
+        "grass_layer_offset": 0.05,
+        "cliff_threshold": 0.2,
+
+        "visual_height_multiplier": 100.0,
+
+        "ambient_brightness": 1.0,
+        "light_direction": {
+            "x": 2.0,
+            "y": 2.0,
+            "z": -1.0
+        },
+
+        "colors": {
+            "grass": [140, 200, 65],
+            "dirt": [180, 130, 50],
+            "cliff": [185, 180, 165],
+            "sand": [255, 200, 120],
+            "water_shallow": [55, 170, 165],
+            "water_deep": [50, 70, 155]
+        }
+    },
+    
+    "forest": {
+        "noise_parameters": {
+            "format": "simple",
+            "data": {
+                "frequency": 0.3,
+                "octaves": 1,
+                "threshold": 0.3
+            }
+        }
+    }
+}

@@ -1,6 +1,8 @@
 #ifndef GAMEOBJ_H
 #define GAMEOBJ_H
 
+#include <json/json.h>
+
 #include <SFML/Graphics.hpp>
 #include "Noise.hpp"
 #include "RenderScripts.hpp"
@@ -267,10 +269,10 @@ namespace game {
         sf::Color water_deep = sf::Color(50, 70, 155);
 
         // direction of incoming light (from the sun)
-        const std::vector<double> light_direction = render::normalize(std::vector<double>{2.0,2.0, -1});
+        std::vector<double> light_direction = render::normalize(std::vector<double>{2.0,2.0, -1});
 
         // ambient brightness
-        const double am_brightness = 1.0;
+        double am_brightness = 1.0;
 
         Island(rs::Vector2<unsigned int> size_, noise::Settings terrain_settings_ = StageDefault) : Stage(size_, terrain_settings_) {}
         Island(unsigned int x_, unsigned int y_, noise::Settings terrain_settings_ = StageDefault) : Island(rs::Vector2<unsigned int>(x_, y_), terrain_settings_) {}
@@ -483,7 +485,7 @@ namespace game {
             // seed the noise
             set_seed(rand());
             // get the size of the scene
-            auto domain = scene.getSize();
+            auto domain = scene.level.render_domain();
             for (unsigned i = 0; i < max_count_; i++) {
                 // chose a random coordinate
                 // TODO - Currently deterministic, needs to be reseeded to some random input
@@ -517,6 +519,55 @@ namespace game {
             }
         }
     };
+}
+
+void load_stage_json(const Json::Value& data_, game::Stage& stage_) {
+    noise::Settings settings;
+    settings.load_json(data_["noise_parameters"]);
+    stage_.set_settings(settings);
+    
+    Json::Value size = data_["size"];
+    stage_.set_stage_size(size["x"].asUInt(), size["y"].asUInt());
+}
+
+void load_island_json(const Json::Value& data_, game::Island& island_) {
+
+    island_.grass_layer_offset = data_["grass_layer_offset"].asDouble();
+    island_.cliff_threshold = data_["cliff_threshold"].asDouble();
+    island_.visual_height_multiplier = data_["visual_height_multiplier"].asDouble();
+
+    island_.am_brightness = data_["ambient_brightness"].asDouble();
+
+    Json::Value light_dir = data_["light_direction"];
+    island_.light_direction[0] = light_dir["x"].asDouble();
+    island_.light_direction[1] = light_dir["y"].asDouble();
+    island_.light_direction[2] = -std::abs(light_dir["z"].asDouble()); // force `z` to be negative
+
+    island_.light_direction = render::normalize(island_.light_direction);
+
+    auto read_color = [] (Json::Value c) {
+        sf::Color color;
+        color.r = c[0].asUInt();
+        color.g = c[1].asUInt();
+        color.b = c[2].asUInt();
+        color.a = c.size() == 4 ? c[3].asUInt() : 255;
+        return color;
+    };
+
+    Json::Value colors = data_["colors"];
+
+    island_.grass = read_color(colors["grass"]);
+    island_.dirt = read_color(colors["dirt"]);
+    island_.cliff = read_color(colors["cliff"]);
+    island_.sand = read_color(colors["sand"]);
+    island_.water_shallow = read_color(colors["water_shallow"]);
+    island_.water_deep = read_color(colors["water_deep"]);
+}
+
+void load_forest_json(const Json::Value& data_, game::ForestGenerator& forest_) {
+    noise::Settings settings;
+    settings.load_json(data_["noise_parameters"]);
+    forest_.set_settings(settings);
 }
 
 #endif
