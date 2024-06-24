@@ -520,7 +520,10 @@ namespace game {
         }
     };
 }
-
+/**
+ * \brief Load stage parameters
+ * \param values_ JSON values to load
+*/
 void load_stage_json(const Json::Value& data_, game::Stage& stage_) {
     noise::Settings settings;
     settings.load_json(data_["noise_parameters"]);
@@ -529,7 +532,10 @@ void load_stage_json(const Json::Value& data_, game::Stage& stage_) {
     Json::Value size = data_["size"];
     stage_.set_stage_size(size["x"].asUInt(), size["y"].asUInt());
 }
-
+/**
+ * \brief Load island parameters. Stage parameters must be loaded separately
+ * \param values_ JSON values to load
+*/
 void load_island_json(const Json::Value& data_, game::Island& island_) {
 
     island_.grass_layer_offset = data_["grass_layer_offset"].asDouble();
@@ -563,7 +569,10 @@ void load_island_json(const Json::Value& data_, game::Island& island_) {
     island_.water_shallow = read_color(colors["water_shallow"]);
     island_.water_deep = read_color(colors["water_deep"]);
 }
-
+/**
+ * \brief Load forest parameters
+ * \param values_ JSON values to load
+*/
 void load_forest_json(const Json::Value& data_, game::ForestGenerator& forest_) {
     noise::Settings settings;
     settings.load_json(data_["noise_parameters"]);
