@@ -44,19 +44,15 @@ namespace noise {
         constexpr Settings() : Settings(0.0,0,0.0) {}
         constexpr Settings(double frequency_, unsigned octaves_, double threshold_) : 
         frequency(frequency_), octaves(octaves_), threshold(threshold_) {}
-        void load_from_path(std::string path_) {
-            Json::Value file;
-            std::ifstream values_file(path_, std::ifstream::binary);
-            if (values_file.good()) {
-                values_file >> file;
-            }
-            load_json(file["noise_parameters"]);
-        }
-        void load_json(Json::Value file_) {
+        /**
+         * \brief Load noise parameters into settings
+         * \param values_ JSON values to load
+        */
+        void load_json(Json::Value values_) {
 
-            std::string format = file_["format"].asString();
+            std::string format = values_["format"].asString();
 
-            Json::Value data_ = file_["data"];
+            Json::Value data_ = values_["data"];
 
             // only "simple" format implemented
             // "format" key in place only for future-proofing
@@ -67,12 +63,9 @@ namespace noise {
                 threshold = data_["threshold"].asDouble();
                 return;
             }
-            if (format == "path") {
-                load_from_path(data_["path"].asString());
-                return;
-            }
 
             std::cout << "Invalid Format!" << std::endl;
+            throw;
         }
     };
 }
