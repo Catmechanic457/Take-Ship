@@ -401,7 +401,7 @@ namespace game {
             // create copy of base texture
             sf::Image texture = files.texture;
             // convert deg to rad for trig
-            auto r = position.rotation * M_PI/ 180.0;
+            auto r = position.rotation * 3.14159 / 180.0;
             // get components of light dir
             auto x1 = context_.light_direction[0];
             auto y1 = context_.light_direction[0];
