@@ -2,6 +2,7 @@
 #define NOISE_H
 
 #include "PerlinNoise.hpp"
+#include "Validate.hpp"
 
 #include <string.h>
 #include <fstream>
@@ -61,10 +62,22 @@ namespace noise {
                 frequency = data_["frequency"].asDouble();
                 octaves = data_["octaves"].asUInt();
                 threshold = data_["threshold"].asDouble();
+
+                // validate
+                if (frequency <= 0) {
+                    send_error_message("frequency", error_type::EXPECTED_POSITIVE, ERROR);
+                    std::cout << std::endl;
+                    throw;
+                }
+                if (threshold < 0 or threshold > 1) {
+                    send_error_message("threshold", error_type::NOT_NORMALIZED, WARN);
+                    std::cout << std::endl;
+                }
                 return;
             }
 
-            std::cout << "Invalid Format!" << std::endl;
+            send_error_message("generic_noise_parameters", error_type::FORMAT_ERROR, ERROR);
+            std::cout << std::endl;
             throw;
         }
     };
