@@ -7,6 +7,8 @@
 #include "Noise.hpp"
 #include "RenderScripts.hpp"
 
+#define EULERS_NUM 2.718281828459
+
 const noise::Settings StageDefault(8.0,3,0.6);
 const noise::Settings ForestDefault(0.75,1,0.5);
 
@@ -441,7 +443,8 @@ namespace game {
             sf::Sprite stamp(texture_source);
             // get the global position and find its relative position
             auto global_pos = position.position;
-            auto local_pos = scene.relative_from_global(global_pos.x, global_pos.y);
+            auto camera_pos = scene.get_camera();
+            sf::Vector2f local_pos(global_pos.x - camera_pos.x, global_pos.y - camera_pos.y);
             // draw in the correct position
             stamp.setOrigin(texture_source.getSize().x/2.0,texture_source.getSize().y/2.0);
             stamp.setPosition(local_pos.x + scene.getSize().x/2, local_pos.y + scene.getSize().y/2);
@@ -454,6 +457,118 @@ namespace game {
         */
         void set_object_file(ObjectFile& objf_) {
             files = objf_;
+        }
+    };
+
+    class ComplexEntity : public BasicEntity {
+        // region around centre of entity where it can collide
+        const rs::Vector2<double> hit_box;
+
+        const double max_health;
+        const double armor;
+        const double mass;
+        // how much the entity slows down over time, based on its current velocity
+        const double drag_coefficient;
+        // determines how the entity behaves in collisions
+        const double elasticity;
+
+        public:
+
+        double health;
+        rs::Vector2<double> velocity;
+        // the resultant force currently applied to spire
+        // excludes force from drag
+        rs::Vector2<double> resultant_force;
+
+        ComplexEntity(render::Scene& parent_scene_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 0.0) :
+        BasicEntity(parent_scene_), max_health(base_health_), armor(armor_), mass(mass_), drag_coefficient(drag_coeff_), elasticity(elasticity_), health(max_health), velocity(0.0,0.0), resultant_force(0.0,0.0)
+        {}
+
+        ComplexEntity(render::Scene& parent_scene_, ObjectFile files_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 0.0) :
+        ComplexEntity(parent_scene_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        {
+            set_object_file(files_);
+        }
+        /**
+         * \brief Apply damage to the entity
+         * \param damage Damage to receive
+         * \param piercing Ignore armour if `true`
+        */
+        void apply_damage(double damage, bool piercing = false) {
+            double dmg = piercing ? damage : damage / armor;
+            health -= dmg;
+        }
+        /**
+         * \return `true` if the health is below 0
+        */
+        bool is_killed() {return health <= 0.0;}
+        /**
+         * \brief Rotate the entity based on how it's currently moving
+        */
+        void goto_natural_rotation() {
+            // weight towards velocity
+            double k = 0.25;
+
+            // add the velocity and acceleration vectors
+            double i = resultant_force.x / mass + k * velocity.x;
+            double j = resultant_force.y / mass + k * velocity.y;
+
+            // use trig to find angle
+            double angle = atan2(j, i) / 3.14159 * 180.0;
+
+            // ensure angle in range 0 to 350
+            while (angle < 0) {
+                angle += 360.0;
+            }
+            while (angle >= 360) {
+                angle -= 360.0;
+            }
+            
+            // set rotation
+            position.rotation = angle;
+        }
+        /**
+         * \brief Calculates the sprites new position
+         * \param t Time in seconds that has elapsed
+        */
+        void move_over_time(double t) {
+            
+            // equation for final velocity
+            auto v = [&] (double u, double a_0) {
+                // let drag coeff = `k`
+                auto& k = drag_coefficient;
+                return ((a_0 - (u * k)) * pow(EULERS_NUM, -k * t) - a_0) / -k;
+            };
+
+            // equation for displacement
+            auto s = [&] (double u, double a_0) {
+                // let drag coeff = `k`
+                auto& k = drag_coefficient;
+                return ((a_0 - (u * k)) * (pow(EULERS_NUM, -k * t) - 1) + (a_0 * t * k)) / (k*k);
+            };
+
+            // `i` represents x direction
+            // `j` represents y direction
+
+            // find acceleration from resultant force
+            double acc_i = resultant_force.x / mass;
+            double acc_j = resultant_force.y / mass;
+
+            // calculate final velocity
+            double v_i = v(velocity.x, acc_i);
+            double v_j = v(velocity.y, acc_j);
+
+            // calculate displacement
+            double dx = s(velocity.x, acc_i);
+            double dy = s(velocity.y, acc_j);
+
+            // set entity velocity to final velocity
+            velocity.x = v_i;
+            velocity.y = v_j;
+
+            // add displacement to entity position
+            position.position.x += dx;
+            position.position.y += dy;
         }
     };
 
