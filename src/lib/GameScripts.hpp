@@ -480,15 +480,31 @@ namespace game {
         // excludes force from drag
         rs::Vector2<double> resultant_force;
 
-        ComplexEntity(render::Scene& parent_scene_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 0.0) :
-        BasicEntity(parent_scene_), max_health(base_health_), armor(armor_), mass(mass_), drag_coefficient(drag_coeff_), elasticity(elasticity_), health(max_health), velocity(0.0,0.0), resultant_force(0.0,0.0)
+        ComplexEntity(render::Scene& parent_scene_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        BasicEntity(parent_scene_), hit_box(hit_box_), max_health(base_health_), armor(armor_), mass(mass_), drag_coefficient(drag_coeff_), elasticity(elasticity_), health(max_health), velocity(0.0,0.0), resultant_force(0.0,0.0)
         {}
 
-        ComplexEntity(render::Scene& parent_scene_, ObjectFile files_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 0.0) :
-        ComplexEntity(parent_scene_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        ComplexEntity(render::Scene& parent_scene_, ObjectFile files_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        ComplexEntity(parent_scene_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
         {
             set_object_file(files_);
         }
+        /**
+         * \return The entity's hit-box
+        */
+        rs::Vector2<double> get_hitbox() {return hit_box;}
+        /**
+         * \return The maximum health
+        */
+        double get_max_health() {return max_health;}
+        /**
+         * \return The mass of the entity
+        */
+        double get_mass() {return mass;}
+        /**
+         * \return The entity's elasticity in collisions
+        */
+        double get_elasticity() {return elasticity;}
         /**
          * \brief Apply damage to the entity
          * \param damage Damage to receive
@@ -570,6 +586,41 @@ namespace game {
             position.position.x += dx;
             position.position.y += dy;
         }
+        /**
+         * \brief Check if the given hit-box intersects the entity's hit-box
+         * \param o_ Position of hit-box to check
+         * \param hit_box_ Size of hit-box
+        */
+        bool collides_with(rs::Vector2<double> o_, rs::Vector2<double> hit_box_ = rs::Vector2<double>(0,0)) {
+            rs::Vector2<double> p1(position.position.x + (hit_box.x/2.0), position.position.y + (hit_box.y/2.0));
+            rs::Vector2<double> p2(position.position.x - (hit_box.x/2.0), position.position.y - (hit_box.y/2.0));
+            rs::Vector2<double> p3(p1.x, p2.y);
+            rs::Vector2<double> p4(p2.x, p1.y);
+
+            rs::Vector2<double> p5(o_.x + (hit_box_.x/2.0), o_.y + (hit_box_.y/2.0));
+            rs::Vector2<double> p6(o_.x - (hit_box_.x/2.0), o_.y - (hit_box_.y/2.0));
+            rs::Vector2<double> p7(p5.x, p6.y);
+            rs::Vector2<double> p8(p6.x, p5.y);
+
+            auto check_intersect = [] (rs::Vector2<double> p1_, rs::Vector2<double> p2_, rs::Vector2<double> cp_) {
+                return p1_.x >= cp_.x and cp_.x >= p2_.x and p1_.y >= cp_.y and cp_.y >= p2_.y;
+            };
+
+            // check if any point in the check hit-box intersects this hit-box
+            if (check_intersect(p1, p2, p5)) {return true;}
+            if (check_intersect(p1, p2, p6)) {return true;}
+            if (check_intersect(p1, p2, p7)) {return true;}
+            if (check_intersect(p1, p2, p8)) {return true;}
+
+            // check if any point in this hit-box intersects the check hit-box
+            if (check_intersect(p5, p6, p1)) {return true;}
+            if (check_intersect(p5, p6, p2)) {return true;}
+            if (check_intersect(p5, p6, p3)) {return true;}
+            if (check_intersect(p5, p6, p4)) {return true;}
+
+            // if all checks fail, return false
+            return false;
+        }
     };
 
     class ForestGenerator : public noise::Noise {
@@ -632,6 +683,54 @@ namespace game {
                     }
                 } 
             }
+        }
+    };
+    class CollisionHandler {
+        // Determines how much damage to apply from a collision
+        static constexpr double collision_damage_constant = 0.01;
+        public:
+        CollisionHandler() = delete; // No instances should be made
+        /**
+         * \brief Handle a *known* collision between two entities
+         * \param e1_ Entity 1
+         * \param e1_ Entity 2
+        */
+        static void handle_collision(ComplexEntity& e1_, ComplexEntity& e2_) {
+            // momentum of e1
+            double m1x = e1_.velocity.x * e1_.get_mass();
+            double m1y = e1_.velocity.y * e1_.get_mass();
+
+            // momentum of e2
+            double m2x = e2_.velocity.x * e2_.get_mass();
+            double m2y = e2_.velocity.y * e2_.get_mass();
+
+            // when elasticity = 0, k = 0.5
+            
+            double k = (e1_.get_elasticity() + e2_.get_elasticity() + 2) / 4.0;
+
+            // find new momentum for each entity
+            double m3x = m2x * k + m1x * (1-k);
+            double m3y = m2y * k + m1y * (1-k);
+
+            double m4x = m1x * k + m2x * (1-k);
+            double m4y = m1y * k + m2y * (1-k);
+
+            // damage is proportional to change in momentum
+            double damage1 = sqrt((m3x - m1x)*(m3x - m1x) + (m3y - m1y)*(m3y - m1y)) * collision_damage_constant;
+            double damage2 = sqrt((m4x - m2x)*(m4x - m2x) + (m4y - m2y)*(m4y - m2y)) * collision_damage_constant;
+
+            std::cout << damage1 << std::endl;
+            std::cout << damage2 << std::endl;
+
+            e1_.apply_damage(damage1);
+            e2_.apply_damage(damage2);
+
+            // find new velocity
+            e1_.velocity.x = m3x / e1_.get_mass();
+            e1_.velocity.y = m3y / e1_.get_mass();
+
+            e2_.velocity.x = m4x / e2_.get_mass();
+            e2_.velocity.y = m4y / e2_.get_mass();
         }
     };
 }
