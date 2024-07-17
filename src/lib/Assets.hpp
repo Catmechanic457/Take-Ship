@@ -55,7 +55,7 @@ bool load_assets() {
     bool load_confirm[] = {
         load_object_file(debug, "debug"),
         load_object_file(tree, "level/tree"),
-        load_object_file(tree, "mobiles/player_ship")
+        load_object_file(player_ship, "mobiles/player_ship")
     };
     // check loading was a success
     for (bool b : load_confirm) {
