@@ -406,11 +406,11 @@ namespace game {
             auto r = position.rotation * 3.14159 / 180.0;
             // get components of light dir
             auto x1 = context_.light_direction[0];
-            auto y1 = context_.light_direction[0];
-            auto z1 = context_.light_direction[0];
+            auto y1 = context_.light_direction[1];
+            auto z1 = context_.light_direction[2];
             std::vector<double> light_direction = {
-                (cos(r)*x1) - (sin(r)*y1),
-                (sin(r)*x1) - (cos(r)*y1),
+                (cos(-r)*x1) - (sin(-r)*y1),
+                (cos(-r)*y1) + (sin(-r)*x1),
                 z1
             };
 
@@ -418,14 +418,17 @@ namespace game {
                 for (unsigned j = 0; j < files.texture.getSize().y; j++) {
                 // for every pixel:
 
-                // get the pixel of the normal map
-                sf::Color n = files.normal_map.getPixel(i, j);
+                    // get the pixel of the normal map
+                    sf::Color n = files.normal_map.getPixel(i, j);
 
-                // convert to a normalized vector
-                std::vector<double> normal = {n.r/255.0, n.g/255.0, n.b/255.0};
-                // get the dot product from incoming light
-                auto dot = render::dot_product(normal, light_direction);
+                    // convert to a normalized vector
+                    std::vector<double> normal = render::normalize<double>({n.r - 127.0, n.g - 127.0, -(n.b - 127.0)});
+                    // get the dot product from incoming light
+                    auto dot = render::dot_product(normal, light_direction);
+
                     dot = dot > 0.0 ? dot : 0; // Assume dot is 0 if dot is negative
+                    // dot must be clamped. ideally, this should be avoided if possible
+                    dot = dot < 1.0 ? dot : 1; // Assume dot is 1 if greater than 1 (due to rounding errors)
 
                     double brightness = (dot + context_.ambient_brightness)/(1.0 + context_.ambient_brightness);
 
@@ -718,9 +721,6 @@ namespace game {
             // damage is proportional to change in momentum
             double damage1 = sqrt((m3x - m1x)*(m3x - m1x) + (m3y - m1y)*(m3y - m1y)) * collision_damage_constant;
             double damage2 = sqrt((m4x - m2x)*(m4x - m2x) + (m4y - m2y)*(m4y - m2y)) * collision_damage_constant;
-
-            std::cout << damage1 << std::endl;
-            std::cout << damage2 << std::endl;
 
             e1_.apply_damage(damage1);
             e2_.apply_damage(damage2);
