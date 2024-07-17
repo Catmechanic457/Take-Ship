@@ -37,7 +37,9 @@ bool load_object_file(ObjectFile& obj_, std::string namespace_) {
 
 namespace assets {
     namespace object_file {
+        ObjectFile debug;
         ObjectFile tree;
+        ObjectFile player_ship;
     }
 }
 
@@ -51,7 +53,9 @@ bool load_assets() {
     // load all assets
     // store the success into the array
     bool load_confirm[] = {
-        load_object_file(tree, "level/tree")
+        load_object_file(debug, "debug"),
+        load_object_file(tree, "level/tree"),
+        load_object_file(tree, "mobiles/player_ship")
     };
     // check loading was a success
     for (bool b : load_confirm) {
