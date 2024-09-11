@@ -40,6 +40,9 @@ namespace assets {
         ObjectFile debug;
         ObjectFile tree;
         ObjectFile player_ship;
+        ObjectFile tank;
+        ObjectFile sniper;
+        ObjectFile cannonball;
     }
 }
 
@@ -55,7 +58,10 @@ bool load_assets() {
     bool load_confirm[] = {
         load_object_file(debug, "debug"),
         load_object_file(tree, "level/tree"),
-        load_object_file(player_ship, "mobiles/player_ship")
+        load_object_file(player_ship, "mobiles/player_ship"),
+        load_object_file(tank, "mobiles/tank"),
+        load_object_file(sniper, "mobiles/sniper"),
+        load_object_file(cannonball, "mobiles/projectile_ball")
     };
     // check loading was a success
     for (bool b : load_confirm) {
