@@ -2,6 +2,7 @@
 #define GAMEOBJ_H
 
 #include <json/json.h>
+#include <random>
 
 #include <SFML/Graphics.hpp>
 #include "Noise.hpp"
@@ -380,6 +381,7 @@ namespace game {
     };
 
     class BasicEntity : public sf::Drawable {
+        protected:
         // texture to use when drawing
         sf::Texture texture_source;
         // reference to the parent scene
@@ -439,7 +441,7 @@ namespace game {
             }
 
             // assign the new texture to the sprite
-            texture_source.loadFromImage(texture);
+            texture_source.loadFromImage(texture); // When player killed, "Unknown Stopping event" fault
         }
         void draw(sf::RenderTarget& target, sf::RenderStates states) const override {
             // sprite object to position and draw the texture
@@ -478,6 +480,7 @@ namespace game {
         public:
 
         double health;
+        bool can_collide = true;
         rs::Vector2<double> velocity;
         // the resultant force currently applied to spire
         // excludes force from drag
@@ -526,7 +529,7 @@ namespace game {
         */
         void goto_natural_rotation() {
             // weight towards velocity
-            double k = 0.25;
+            double k = 10;
 
             // add the velocity and acceleration vectors
             double i = resultant_force.x / mass + k * velocity.x;
@@ -625,10 +628,68 @@ namespace game {
             return false;
         }
     };
+    struct Weapon {
+        // cooldown between weapon uses in seconds
+        double base_cooldown;
+        // remaining cooldown in seconds
+        double current_cooldown = 0.0;
+        // relative placement of weapon in relation to entities centre
+        rs::Position origin;
+    };
+
+    class HostileEntity : public ComplexEntity {
+        public:
+        // list of all weapons belonging to the entity
+        std::vector<Weapon> weapons;
+
+        HostileEntity(render::Scene& parent_scene_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        ComplexEntity(parent_scene_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        {}
+        HostileEntity(render::Scene& parent_scene_, ObjectFile files_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        ComplexEntity(parent_scene_, files_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        {}
+        /**
+         * \return `true` if weapon successfully fired
+        */
+        bool try_fire(unsigned index_) {
+            // get the memory address of the weapon
+            auto& weapon = weapons[index_];
+            // check it's not on cooldown
+            if (weapon.current_cooldown <= 0.0) {
+                // reset cooldown
+                weapon.current_cooldown = weapon.base_cooldown;
+                return true;
+            }
+            return false;
+        }
+        rs::Position weapon_position(unsigned index_) {
+            auto weapon = weapons[index_];
+            auto r = position.rotation * 3.14159 / 180.0;
+            auto x = weapon.origin.position.x;
+            auto y = weapon.origin.position.y;
+            double i = (cos(-r)*x) - (sin(-r)*y);
+            double j = (cos(-r)*y) + (sin(-r)*x);
+            rs::Position pos;
+            pos.position.x = position.position.x + x;
+            pos.position.y = position.position.y + y;
+            pos.rotation = position.rotation + weapon.origin.rotation;
+
+            return pos;
+        }
+    };
+    struct HostileController {
+        virtual void action(HostileEntity& entity) = 0;
+    };
+
+    struct ControlledHostile {
+        HostileEntity* entity;
+        HostileController* controller;
+    };
 
     class ForestGenerator : public noise::Noise {
         // reference to parent scene
         render::Scene& scene;
+        //game::Stage& stage; // ?? idk
         // settings to use
         noise::Settings settings;
 
@@ -731,6 +792,296 @@ namespace game {
 
             e2_.velocity.x = m4x / e2_.get_mass();
             e2_.velocity.y = m4y / e2_.get_mass();
+        }
+    };
+    class GameHandler {
+
+        render::Scene& scene;
+        game::Stage& stage;
+        HostileEntity* player_ship;
+        ComplexEntity cannonball;
+
+        // stores a reference to every mobile on the scene
+        std::vector<ComplexEntity*> mobiles;
+
+        // stores a reference to every enemy on the scene
+        std::vector<ComplexEntity*> enemies;
+
+        // stores the controller object for each controlled mobile
+        std::vector<ControlledHostile*> controlled_hostiles;
+        /**
+         * \brief Add an entity to the scene
+        */
+        void add_entity(ComplexEntity* e_) {
+            mobiles.push_back(e_);
+            scene.drawables.push_back(e_);
+        }
+        /**
+         * \brief Remove the given mobile from the mobile array. Does not delete the pointer
+         * \param t_mobile_ Mobile to remove
+        */
+        void remove_mobile(ComplexEntity* t_mobile_) {
+            for (unsigned i = 0; i < mobiles.size(); i++) {
+                // check if addresses match
+                if (t_mobile_ == mobiles[i]) {
+                    mobiles.erase(mobiles.begin()+i);
+                    return;
+                }
+            }
+            // throw if not found
+            throw;
+        }
+        /**
+         * \brief Delete all mobiles
+        */
+        void delete_mobiles() {
+            for (auto* mobile : mobiles) delete mobile; // free memory
+            mobiles.clear(); // clear the array
+        }
+        /**
+         * \brief Remove the given mobile from the mobile array and drawables
+         * \param t_mobile_ Mobile to kill
+        */
+        void kill_mobile(ComplexEntity* t_mobile_) {
+            scene.remove_drawable(t_mobile_);
+            remove_mobile(t_mobile_);
+
+            std::cout << "Deleting entity `" << t_mobile_ << "`\n";
+
+            delete t_mobile_;
+
+            std::cout << "Mobile array size is now " << mobiles.size() << '\n';
+        }
+        /**
+         * \brief Detect and handle any collisions between mobiles
+        */
+        void handle_collisions() {
+            // for all mobiles
+            // note - last mobile is skipped as all pairs will already be exhausted
+            for (unsigned i = 0; i < mobiles.size() - 1; i++) {
+                // check remaining pairs
+                for (auto j = i + 1; j < mobiles.size(); j++) {
+                    // check for collision
+                    if (mobiles[i]->collides_with(mobiles[j]->position.position, mobiles[j]->get_hitbox())) {
+                        // handle collision
+                        CollisionHandler::handle_collision(*mobiles[i], *mobiles[j]);
+                    }
+                }
+            }
+        }
+        /**
+         * \brief Move all mobiles to their next positions
+         * \param t_ Time elapsed
+        */
+        void move_mobiles(double t_) {
+            for (auto mobile : mobiles) {
+                mobile->move_over_time(t_);
+                mobile->goto_natural_rotation();
+            }
+        }
+        /**
+         * \brief Remove mobiles with a health that is < 0
+        */
+        void remove_killed_mobiles() {
+            for (auto mobile : mobiles) {
+                if (mobile->is_killed()) kill_mobile(mobile);
+            }
+        }
+        /**
+         * \brief Update the textures of all mobiles
+        */
+        void update_textures() {
+            for (auto mobile : mobiles) {mobile->update_texture(scene.get_render_context());}
+        }
+        /**
+         * \brief Resets all entities for a new round
+        */
+        void reset_entities() {
+            
+            // clear all old entities from memory
+            delete_mobiles();
+            scene.clear_drawables();
+
+            // delete the old player
+            //delete player_ship; seg fault
+
+            // create a new player
+            player_ship = new HostileEntity(scene, assets::object_file::player_ship, rs::Vector2(32.0,32.0), 200, 3, 75, 0.4, 0.8); // temp health to 10 - must change
+            //player_ship->update_texture(scene.get_render_context());
+
+            add_entity(player_ship);
+
+            // TODO - create the controller objects
+
+            // create 3 tanks
+            for (unsigned i = 0; i < 3; i++) {
+                enemies.push_back(new HostileEntity(scene, assets::object_file::tank, rs::Vector2(32.0,32.0), 150, 4, 145, 0.4, 0.4));
+            }
+
+            // create 3 snipers
+            for (unsigned i = 0; i < 3; i++) {
+                enemies.push_back(new HostileEntity(scene, assets::object_file::sniper, rs::Vector2(32.0,32.0), 75, 1, 80, 0.4, 0.8));
+            }
+
+            // push all enemies onto the mobile array
+            for (auto* e : enemies) {
+                add_entity(e);
+            }
+        }
+        /**
+         * \return `true` if the given position is a valid spawn for a ship entity
+        */
+        bool valid_spawn(double x_, double y_) {
+            int check_pattern[9][2] = {
+                {1,1}, {1,0}, {1,-1},
+                {0,1}, {0,0}, {0,-1},
+                {-1,1}, {-1,0}, {-1,-1}
+            };
+
+            double scale = 32.0;
+
+            // if any point in the check pattern is invalid, spawn is invalid
+            for (auto p : check_pattern) {
+                if (!stage.valid(rs::Vector2(x_ + (p[0] * scale), y_ + (p[1] * scale)))) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        /**
+         * \brief Spawn the player and enemy ships
+        */
+        void spawn_ships() {
+
+            // midpoint of level
+            auto mx = scene.level.render_domain().x/2;
+            auto my = scene.level.render_domain().y/2;
+
+            // spawn player at centre
+
+            player_ship->position.position.x = mx;
+            player_ship->position.position.y = my;
+            player_ship->position.rotation = 0;
+
+            // TODO - Use a better method for random coordinates
+            
+            // "minimum player separation" - the closest distance an enemy can spawn from the player
+            double mps = 180.0;
+
+            // "minimum enemy separation" - the closest distance an enemy can spawn from another enemy
+            double mes = 60.0;
+
+            for (unsigned i = 0; i < enemies.size(); i++) {
+                while (true) {
+                    
+                    try_spawn_enemy:
+
+                    int x = rand() % scene.level.render_domain().x;
+                    int y = rand() % scene.level.render_domain().y;
+
+                    auto dx = x - scene.level.render_domain().x/2;
+                    auto dy = y - scene.level.render_domain().y/2;
+
+                    // check mps
+                    if ((dx*dx + dy*dy) < mps*mps) {goto try_spawn_enemy;}
+
+                    // check mes
+                    for (unsigned j = 0; j < i; j++) {
+                        // for all already placed enemies
+                        auto dx = x - enemies[j]->position.position.x;
+                        auto dy = y - enemies[j]->position.position.y;
+
+                        if ((dx*dx + dy*dy) < mes*mes) {goto try_spawn_enemy;}
+                    }
+
+                    // check valid
+                    if (!valid_spawn(x,y)) {goto try_spawn_enemy;}
+
+                    // ensure there exists a valid path between the enemy and player
+                    // this ensures that the enemy is able to reach the player
+                    // this is an expensive process. optimisation steps should start here
+                    if (!stage.path_exists(rs::Vector2(mx,my), rs::Vector2(x,y))) {goto try_spawn_enemy;}
+
+                    enemies[i]->position.position.x = x;
+                    enemies[i]->position.position.y = y;
+                    enemies[i]->position.rotation = 0; // face centre maybe?
+
+                    break;
+                }
+            }
+        }
+        /**
+         * \brief React to player input
+        */
+        void player_input() {
+            // force of player input
+            double motor_force = 3000.0;
+            double cannon_velocity = 70.0;
+
+            // mouse input
+            auto mouse_pos = scene.mapPixelToCoords(sf::Mouse::getPosition(scene));
+            mouse_pos.x -= scene.getSize().x/2;
+            mouse_pos.y -= scene.getSize().y/2;
+
+            // force direction as unit vector
+            auto fuv = render::normalize<double>({mouse_pos.x, mouse_pos.y});
+            player_ship->resultant_force.x = fuv[0] * motor_force;
+            player_ship->resultant_force.y = fuv[1] * motor_force;
+
+            // left and right cannons
+            if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+                std::cout << "Try fire: Left\n";
+                //if (player_ship->try_fire(0)) {
+                //    // allocate memory for a new cannonball
+                //    auto* new_cannonball = new ComplexEntity(cannonball);
+                //    new_cannonball->position = player_ship->weapon_position(0);
+                //    add_entity(new_cannonball);
+                //}
+            }
+            if (sf::Mouse::isButtonPressed(sf::Mouse::Right)) {
+                std::cout << "Try fire: Right\n";
+                //if (player_ship->try_fire(1)) {
+                //    // allocate memory for a new cannonball
+                //    auto* new_cannonball = new ComplexEntity(cannonball);
+                //    new_cannonball->position = player_ship->weapon_position(1);
+                //    add_entity(new_cannonball);
+                //}
+            }
+        }
+        public:
+        GameHandler(render::Scene& scene_, game::Stage& stage_) :
+        scene(scene_),
+        stage(stage_),
+        cannonball(scene_, rs::Vector2(4,4), 5, 1, 10, 0.4, 0.1)
+        {
+            load_assets();
+            cannonball.set_object_file(assets::object_file::cannonball);
+        }
+        /**
+         * \brief Prepare for new round
+        */
+        void initialise_round() {
+            reset_entities();
+            spawn_ships();
+
+            std::cout << "Created " << mobiles.size() << " mobile entities.\n";
+        }
+        /**
+         * \brief Step all continuous processes
+         * \param time_elapsed Time since last frame
+        */
+        void step(double time_elapsed_) {
+
+            //scene.set_camera(player_ship->position.position);
+            
+            //player_input();
+
+            handle_collisions();
+            move_mobiles(time_elapsed_);
+            update_textures();
+            remove_killed_mobiles();
+
         }
     };
 }
