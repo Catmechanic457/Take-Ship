@@ -159,6 +159,28 @@ namespace render {
 
         // stores the address of all drawables
         std::vector<sf::Drawable*> drawables;
+        /**
+         * \brief Clear the drawables array
+        */
+        void clear_drawables() {
+            for (auto* drawable : drawables) delete drawable;
+            drawables.clear();
+        }
+        /**
+         * \brief Removes the given drawable
+         * \param drawable_ Drawable to remove
+        */
+        void remove_drawable(sf::Drawable* t_drawable_) {
+            for (unsigned i = 0; i < drawables.size(); i++) {
+                // check if addresses match
+                if (t_drawable_ == drawables[i]) {
+                    drawables.erase(drawables.begin()+i);
+                    return;
+                }
+            }
+            std::cout << "Deletion of " << t_drawable_ << " failed. Entity not found.";
+            throw;
+        }
         render::RenderContext get_render_context() {return level.render_context();}
         /**
          * \return The global position
