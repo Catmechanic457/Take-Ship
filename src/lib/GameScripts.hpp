@@ -627,12 +627,17 @@ namespace game {
             // if all checks fail, return false
             return false;
         }
+        virtual void kill() {delete this;}
     };
     struct Weapon {
         // cooldown between weapon uses in seconds
         double base_cooldown;
         // remaining cooldown in seconds
         double current_cooldown = 0.0;
+        // the velocity projectiles are launched
+        double launch_velocity;
+        // how long the projectile stays in the air
+        double flight_time = __DBL_MAX__;
         // relative placement of weapon in relation to entities centre
         rs::Position origin;
     };
@@ -664,23 +669,36 @@ namespace game {
         }
         rs::Position weapon_position(unsigned index_) {
             auto weapon = weapons[index_];
-            auto r = position.rotation * 3.14159 / 180.0;
+            auto r = (position.rotation + weapon.origin.rotation) * 3.14159 / 180.0;
             auto x = weapon.origin.position.x;
             auto y = weapon.origin.position.y;
-            double i = (cos(-r)*x) - (sin(-r)*y);
-            double j = (cos(-r)*y) + (sin(-r)*x);
+            double i = (cos(r)*x) - (sin(r)*y);
+            double j = (cos(r)*y) + (sin(r)*x);
             rs::Position pos;
-            pos.position.x = position.position.x + x;
-            pos.position.y = position.position.y + y;
+            pos.position.x = position.position.x + i;
+            pos.position.y = position.position.y + j;
             pos.rotation = position.rotation + weapon.origin.rotation;
 
             return pos;
         }
     };
+
+    class Projectile : public ComplexEntity {
+        public:
+        Projectile(render::Scene& parent_scene_, rs::Vector2<double> hit_box_, double base_health_ = 1.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.05, double elasticity_ = 0.4) :
+        ComplexEntity(parent_scene_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        {}
+        Projectile(render::Scene& parent_scene_, ObjectFile files_, rs::Vector2<double> hit_box_, double base_health_ = 1.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.05, double elasticity_ = 0.4) :
+        ComplexEntity(parent_scene_, files_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        {}
+        double r_collision_grace = 0.25;
+        double r_flight_time;
+        void kill() override {r_flight_time = 0;}
+    };
+
     struct HostileController {
         virtual void action(HostileEntity& entity) = 0;
     };
-
     struct ControlledHostile {
         HostileEntity* entity;
         HostileController* controller;
@@ -799,13 +817,16 @@ namespace game {
         render::Scene& scene;
         game::Stage& stage;
         HostileEntity* player_ship;
-        ComplexEntity cannonball;
+        Projectile cannonball;
 
         // stores a reference to every mobile on the scene
         std::vector<ComplexEntity*> mobiles;
 
         // stores a reference to every enemy on the scene
         std::vector<ComplexEntity*> enemies;
+
+        // stores a reference to every projectile on the scene
+        std::vector<Projectile*> projectiles;
 
         // stores the controller object for each controlled mobile
         std::vector<ControlledHostile*> controlled_hostiles;
@@ -843,12 +864,11 @@ namespace game {
          * \param t_mobile_ Mobile to kill
         */
         void kill_mobile(ComplexEntity* t_mobile_) {
-            scene.remove_drawable(t_mobile_);
-            remove_mobile(t_mobile_);
-
             std::cout << "Deleting entity `" << t_mobile_ << "`\n";
 
-            delete t_mobile_;
+            scene.remove_drawable(t_mobile_);
+            remove_mobile(t_mobile_);
+            t_mobile_->kill(); // mobile my be left undeleted
 
             std::cout << "Mobile array size is now " << mobiles.size() << '\n';
         }
@@ -859,8 +879,10 @@ namespace game {
             // for all mobiles
             // note - last mobile is skipped as all pairs will already be exhausted
             for (unsigned i = 0; i < mobiles.size() - 1; i++) {
+                if (mobiles[i]->can_collide == false) {continue;}
                 // check remaining pairs
                 for (auto j = i + 1; j < mobiles.size(); j++) {
+                    if (mobiles[j]->can_collide == false) {continue;}
                     // check for collision
                     if (mobiles[i]->collides_with(mobiles[j]->position.position, mobiles[j]->get_hitbox())) {
                         // handle collision
@@ -894,6 +916,38 @@ namespace game {
             for (auto mobile : mobiles) {mobile->update_texture(scene.get_render_context());}
         }
         /**
+         * \brief Initialises a new player ship
+         * \return A pointer to the new player
+        */
+        HostileEntity* create_player() {
+
+            // create a new player
+            player_ship = new HostileEntity(scene, assets::object_file::player_ship, rs::Vector2(32.0,32.0), 50, 3, 75, 0.4, 0.8);
+
+            // define left and right weapons
+            Weapon player_cannon_left, player_cannon_right;
+
+            // use left cannon to define properties
+            player_cannon_left.base_cooldown = 1.0; // change to 1.0
+            player_cannon_left.launch_velocity = 100.0;
+            player_cannon_left.flight_time = 4.0;
+            player_cannon_left.origin.position.x = 0.0;
+            player_cannon_left.origin.position.y = 10.0; // change
+            player_cannon_left.origin.rotation = 180.0;
+
+            // modify left side properties for right side
+            player_cannon_right = player_cannon_left;
+            player_cannon_right.origin.position.y *= 1; // flip y-axis
+            player_cannon_right.origin.rotation -= 180.0; // rotate 180
+
+            // add weapons to the player ship
+            player_ship->weapons.push_back(player_cannon_left);
+            player_ship->weapons.push_back(player_cannon_right);
+
+            // return the player object
+            return player_ship;
+        }
+        /**
          * \brief Resets all entities for a new round
         */
         void reset_entities() {
@@ -906,9 +960,7 @@ namespace game {
             //delete player_ship; seg fault
 
             // create a new player
-            player_ship = new HostileEntity(scene, assets::object_file::player_ship, rs::Vector2(32.0,32.0), 200, 3, 75, 0.4, 0.8); // temp health to 10 - must change
-            //player_ship->update_texture(scene.get_render_context());
-
+            create_player();
             add_entity(player_ship);
 
             // TODO - create the controller objects
@@ -970,7 +1022,7 @@ namespace game {
             double mps = 180.0;
 
             // "minimum enemy separation" - the closest distance an enemy can spawn from another enemy
-            double mes = 60.0;
+            double mes = 32.0;
 
             for (unsigned i = 0; i < enemies.size(); i++) {
                 while (true) {
@@ -1012,12 +1064,68 @@ namespace game {
             }
         }
         /**
+         * \brief Give the projectile velocity and add it to the projectile array
+        */
+        void launch_projectile(HostileEntity* parent_, unsigned weapon_index_, Projectile* projectile_) {
+            auto& weapon = parent_->weapons[weapon_index_];
+
+            double x = parent_->weapon_position(weapon_index_).position.x;
+            double y = parent_->weapon_position(weapon_index_).position.y;
+
+            double r = (parent_->position.rotation + weapon.origin.rotation) * 3.14159 / 180.0;
+            double v = weapon.launch_velocity;
+
+            double i = parent_->velocity.x;
+            double j = parent_->velocity.y;
+
+            projectile_->position.position.x = x;
+            projectile_->position.position.y = y;
+            projectile_->velocity.x = i + (sin(-r) * v);
+            projectile_->velocity.y = j + (cos(-r) * v);
+
+            projectile_->r_flight_time = weapon.flight_time;
+            projectile_->r_collision_grace = 0.25;
+            projectile_->can_collide = false;
+            projectiles.push_back(projectile_);
+        }
+        /**
+         * \brief Update the flight time and collision grace of projectiles
+         * \param t_ time elapsed
+        */
+        void step_projectiles(double t_) {
+            // this could be optimized by sorting by least remaining time, etc.
+            for (unsigned i = 0; i < projectiles.size(); i++) {
+                auto* e = projectiles[i];
+
+                e->r_collision_grace -= t_;
+                e->can_collide = e->r_collision_grace < 0.0;
+                e->r_flight_time -= t_;
+
+                if (e->r_flight_time < 0.0) {
+
+                    // kill only if not already dead
+                    if (e->health > 0.0) {kill_mobile(e);};
+
+                    projectiles.erase(projectiles.begin()+i);
+                    delete e; // we can be sure the projectile is no longer needed
+                    
+                    i--; // reduce i by one since array size has changed
+                }
+            }
+        }
+        /**
+         * \brief Updates weapon cooldowns
+         * \param t_ time elapsed
+        */
+        void update_weapon_cooldowns(HostileEntity* e_, double t_) {
+            for (auto& w : e_->weapons) {w.current_cooldown -= t_;}
+        }
+        /**
          * \brief React to player input
         */
         void player_input() {
             // force of player input
             double motor_force = 3000.0;
-            double cannon_velocity = 70.0;
 
             // mouse input
             auto mouse_pos = scene.mapPixelToCoords(sf::Mouse::getPosition(scene));
@@ -1032,28 +1140,28 @@ namespace game {
             // left and right cannons
             if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
                 std::cout << "Try fire: Left\n";
-                //if (player_ship->try_fire(0)) {
-                //    // allocate memory for a new cannonball
-                //    auto* new_cannonball = new ComplexEntity(cannonball);
-                //    new_cannonball->position = player_ship->weapon_position(0);
-                //    add_entity(new_cannonball);
-                //}
+                if (player_ship->try_fire(0)) {
+                    // allocate memory for a new cannonball
+                    auto* new_cannonball = new Projectile(cannonball);
+                    add_entity(new_cannonball);
+                    launch_projectile(player_ship, 0, new_cannonball);
+                }
             }
             if (sf::Mouse::isButtonPressed(sf::Mouse::Right)) {
                 std::cout << "Try fire: Right\n";
-                //if (player_ship->try_fire(1)) {
-                //    // allocate memory for a new cannonball
-                //    auto* new_cannonball = new ComplexEntity(cannonball);
-                //    new_cannonball->position = player_ship->weapon_position(1);
-                //    add_entity(new_cannonball);
-                //}
+                if (player_ship->try_fire(1)) {
+                    // allocate memory for a new cannonball
+                    auto* new_cannonball = new Projectile(cannonball);
+                    add_entity(new_cannonball);
+                    launch_projectile(player_ship, 1, new_cannonball);
+                }
             }
         }
         public:
         GameHandler(render::Scene& scene_, game::Stage& stage_) :
         scene(scene_),
         stage(stage_),
-        cannonball(scene_, rs::Vector2(4,4), 5, 1, 10, 0.4, 0.1)
+        cannonball(scene_, rs::Vector2(4,4))
         {
             load_assets();
             cannonball.set_object_file(assets::object_file::cannonball);
@@ -1073,15 +1181,17 @@ namespace game {
         */
         void step(double time_elapsed_) {
 
-            //scene.set_camera(player_ship->position.position);
+            scene.set_camera(player_ship->position.position);
             
-            //player_input();
+            player_input();
 
             handle_collisions();
             move_mobiles(time_elapsed_);
             update_textures();
             remove_killed_mobiles();
 
+            step_projectiles(time_elapsed_);
+            update_weapon_cooldowns(player_ship, time_elapsed_);
         }
     };
 }
