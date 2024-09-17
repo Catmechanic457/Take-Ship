@@ -867,8 +867,6 @@ namespace game {
             scene.remove_drawable(t_mobile_);
             remove_mobile(t_mobile_);
             t_mobile_->kill(); // mobile may be left undeleted
-
-            std::cout << "Mobile array size is now " << mobiles.size() << '\n';
         }
         /**
          * \brief Detect and handle any collisions between mobiles
@@ -1139,7 +1137,6 @@ namespace game {
 
             // left and right cannons
             if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
-                std::cout << "Try fire: Left\n";
                 if (player_ship->try_fire(0)) {
                     // allocate memory for a new cannonball
                     auto* new_cannonball = new Projectile(cannonball);
@@ -1148,7 +1145,6 @@ namespace game {
                 }
             }
             if (sf::Mouse::isButtonPressed(sf::Mouse::Right)) {
-                std::cout << "Try fire: Right\n";
                 if (player_ship->try_fire(1)) {
                     // allocate memory for a new cannonball
                     auto* new_cannonball = new Projectile(cannonball);

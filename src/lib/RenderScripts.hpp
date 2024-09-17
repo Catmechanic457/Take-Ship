@@ -196,7 +196,7 @@ namespace render {
                     return;
                 }
             }
-            std::cout << "Deletion of " << t_drawable_ << " failed. Entity not found.";
+            std::cout << "Deletion of " << t_drawable_ << " failed. Entity not found.\n";
             throw;
         }
         render::RenderContext get_render_context() {return level.render_context();}
