@@ -903,7 +903,9 @@ namespace game {
          * \brief Remove mobiles with a health that is < 0
         */
         void remove_killed_mobiles() {
-            for (auto mobile : mobiles) {
+            // iterate backwards to avoid index issues when item removed
+            for (unsigned i = mobiles.size(); i > 0; i--) {
+                auto* mobile = mobiles[i-1];
                 if (mobile->is_killed()) kill_mobile(mobile);
             }
         }
@@ -1099,7 +1101,7 @@ namespace game {
                 e->can_collide = e->r_collision_grace < 0.0;
                 e->r_flight_time -= t_;
 
-                if (e->r_flight_time < 0.0) {
+                if (e->r_flight_time <= 0.0) {
 
                     // kill only if not already dead
                     if (e->health > 0.0) {kill_mobile(e);};
