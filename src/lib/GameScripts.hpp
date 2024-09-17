@@ -444,15 +444,12 @@ namespace game {
             texture_source.loadFromImage(texture); // When player killed, "Unknown Stopping event" fault
         }
         void draw(sf::RenderTarget& target, sf::RenderStates states) const override {
-            // sprite object to position and draw the texture
+            // set sprite object to position and draw the texture
             sf::Sprite stamp(texture_source);
-            // get the global position and find its relative position
             auto global_pos = position.position;
-            auto camera_pos = scene.get_camera();
-            sf::Vector2f local_pos(global_pos.x - camera_pos.x, global_pos.y - camera_pos.y);
             // draw in the correct position
             stamp.setOrigin(texture_source.getSize().x/2.0,texture_source.getSize().y/2.0);
-            stamp.setPosition(local_pos.x + scene.getSize().x/2, local_pos.y + scene.getSize().y/2);
+            stamp.setPosition(global_pos.x, global_pos.y);
             stamp.setRotation(position.rotation);
             target.draw(stamp);
         }
@@ -866,9 +863,10 @@ namespace game {
         void kill_mobile(ComplexEntity* t_mobile_) {
             std::cout << "Deleting entity `" << t_mobile_ << "`\n";
 
+            t_mobile_->health = 0.0;
             scene.remove_drawable(t_mobile_);
             remove_mobile(t_mobile_);
-            t_mobile_->kill(); // mobile my be left undeleted
+            t_mobile_->kill(); // mobile may be left undeleted
 
             std::cout << "Mobile array size is now " << mobiles.size() << '\n';
         }
@@ -1129,8 +1127,8 @@ namespace game {
 
             // mouse input
             auto mouse_pos = scene.mapPixelToCoords(sf::Mouse::getPosition(scene));
-            mouse_pos.x -= scene.getSize().x/2;
-            mouse_pos.y -= scene.getSize().y/2;
+            mouse_pos.x -= player_ship->position.position.x;
+            mouse_pos.y -= player_ship->position.position.y;
 
             // force direction as unit vector
             auto fuv = render::normalize<double>({mouse_pos.x, mouse_pos.y});

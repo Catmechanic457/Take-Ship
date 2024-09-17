@@ -86,50 +86,68 @@ namespace render {
 
     class Scene : public sf::RenderWindow {
         
-        // the static layer contains all the pixels that make up the stage
-        // these pixels have fixed positions
-        // the pixels will be rendered per pixel from first to last
-        // the index in the 2D vector marks the global position value
-        std::vector<std::vector<std::vector<PixelInfo>>> static_layer;
+        // the image buffer stores the layer textures during creation
+        // outside of scene creation, this pointer will be null
+        sf::Image* layer_image_buffer = nullptr;
 
-        rs::Vector2<int> camera; // origin of local position
+        // stores each layer's texture
+        std::vector<sf::Texture> layer_textures;
 
-        void initialise_static_layer() {
+        // stores extra infomation about pixels in the static layer
+        std::vector<std::vector<std::vector<PixelInfo>>> pixel_info;
+
+        rs::Vector2<double> camera; // origin of local position
+    
+        /**
+         * \brief Render a single layer
+         * \param index_ Layer index to render
+        */
+        void build_single_layer(unsigned index_) { 
+            auto domain = level.render_domain();
+            layer_image_buffer[index_].create(domain.x, domain.y);
+            // for each row (y)
+            for (unsigned y = 0; y < domain.y; y++) {
+                // for each column (x)
+                for (unsigned x = 0; x < domain.x; x++) {
+                    layer_image_buffer[index_].setPixel(x, y, render_pixel(level.pixel(x, y, index_)));
+                }
+            }
+            layer_textures[index_].loadFromImage(layer_image_buffer[index_]);
+            //layer_textures[index_].setSmooth(true);
+        }
+        /**
+         * \brief Update the `static_layer` image and apply it to the background texture
+        */
+        void build_static_layer() {
+            // reset pixel info
             auto domain = level.render_domain();
             unsigned layer_count = level.layer_count();
-            static_layer = std::vector<std::vector<std::vector<PixelInfo>>>(
+            pixel_info = std::vector<std::vector<std::vector<PixelInfo>>>(
                 domain.y,
                 std::vector<std::vector<PixelInfo>>(
                     domain.x,
                     std::vector<PixelInfo>(layer_count)
                 )
             );
-        }
-        /**
-         * \brief Render a single layer
-         * \param index_ Layer index to render
-        */
-        void build_single_layer(unsigned index_) {
-            auto domain = level.render_domain();
-            // for each row (y)
-            for (unsigned y = 0; y < domain.y; y++) {
-                // for each column (x)
-                for (unsigned x = 0; x < domain.x; x++) {
-                    // for each layer
-                    static_layer[y][x][index_] = level.pixel(x, y, index_);
-                }
-            }
-        }
-        /**
-         * \brief Update the `static_layer`
-        */
-        void build_static_layer() {
+
+            // allocate memory for the image buffer
+            layer_image_buffer = new sf::Image[layer_count];
+
+            // create textures
+            layer_textures = std::vector<sf::Texture>(layer_count);
+
+            // start a thread for each layer in the level
             std::vector<std::thread> render_threads;
-            for (unsigned i = 0; i < level.layer_count(); i++) {
+            for (unsigned i = 0; i < layer_count; i++) {
                 std::thread t(&build_single_layer, this, i);
                 render_threads.push_back(std::move(t));
             }
+            // wait for all threads to end
             for (auto& t : render_threads) {t.join();}
+
+            // deallocate memory
+            delete[] layer_image_buffer;
+            layer_image_buffer = nullptr;
         }
         /**
          * \return The colour of the rendered pixel
@@ -183,32 +201,14 @@ namespace render {
         }
         render::RenderContext get_render_context() {return level.render_context();}
         /**
-         * \return The global position
-        */
-        rs::Vector2<unsigned>global_from_relative(int x_, int y_) {
-            return rs::Vector2 (
-                x_ + camera.x,
-                y_ + camera.y
-            );
-        }
-        /**
-         * \return The relative position
-        */
-        rs::Vector2<unsigned>relative_from_global(int x_, int y_) {
-            return rs::Vector2 (
-                x_ - camera.x,
-                y_ - camera.y
-            );
-        }
-        /**
          * \return The camera position
         */
-        rs::Vector2<int> get_camera() {return camera;}
+        rs::Vector2<double> get_camera() {return camera;}
         /**
          * \brief Set the camera position
          * \param pos_ New position
         */
-        void set_camera(rs::Vector2<int> pos_) {
+        void set_camera(rs::Vector2<double> pos_) {
             camera = pos_;
         }
         /**
@@ -221,7 +221,6 @@ namespace render {
          * \brief Build a new level using the current seed
         */
         void generate() {
-            initialise_static_layer();
             build_static_layer();
         }
         /**
@@ -236,33 +235,9 @@ namespace render {
          * \brief Render the static layer
         */
         void render_static_layer() {
-            auto window_size = getSize();
-            auto domain = level.render_domain();
-            // for every layer
-            for (unsigned i = 0; i < level.layer_count(); i++) {
-                // create in image that represents the layer
-                sf::Image layer_map;
-                layer_map.create(window_size.x, window_size.y);
-                // for every row (y)
-                for (unsigned y = 0; y < window_size.y; y++) {
-                    // for every column (x)
-                    for (unsigned x = 0; x < window_size.x; x++) {
-                        // find the global position
-                        auto global_pos = global_from_relative(x - window_size.x/2, y - window_size.y/2);
-                        
-                        // add the pixel to the layer image
-                        if (global_pos.x < 0 or global_pos.x >= domain.x or global_pos.y < 0 or global_pos.y >= domain.y) {
-                            layer_map.setPixel(x, y, sf::Color::Black);
-                        }
-                        else {layer_map.setPixel(x, y, render_pixel(static_layer[global_pos.y][global_pos.x][i]));}
-                    }
-                }
-                // load the image onto a texture
-                sf::Texture t;
-                t.loadFromImage(layer_map);
-                // create a drawable sprite using the texture
+            // draw each layer texture to the screen
+            for (auto& t : layer_textures) {
                 sf::Sprite s(t);
-                // draw the sprite to the screen
                 draw(s);
             }
         }
@@ -277,7 +252,7 @@ namespace render {
          * \return Pixel info for a specific point
         */
         std::vector<render::PixelInfo> get_pixel_info(unsigned x_, unsigned y_) {
-            return static_layer[y_][x_];
+            return pixel_info[y_][x_];
         }
     };
 }
