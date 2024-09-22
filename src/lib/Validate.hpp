@@ -44,7 +44,7 @@ enum error_type {
  * \param warn Type of warning to issue
 */
 void send_error_message(std::string var_name, error_type type, std::string warn) {
-    std::cout << '[' << warn << "]" << " Issue for input `" << var_name << "` : " << messages[type];
+    std::cout << '[' << warn << "]" << " Issue for `" << var_name << "` : " << messages[type] << std::endl;
 }
 
 
