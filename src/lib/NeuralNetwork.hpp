@@ -2,6 +2,7 @@
 #define NN_H
 
 #include <vector>
+#include <cmath>
 #include <functional>
 #include <string.h>
 #include <fstream>
@@ -11,7 +12,24 @@
 // Special thanks to the CS department - Rooms 13 & 14
 const unsigned file_signature = 0x43531314;
 
+const double e = 2.718281828459045;
+
+// linear activation function
+// range: x ∈ R
 const std::function<double(double)> af_linear = [](double value_) {return value_;};
+// sigmoid activation function
+// range: -1 < x < 1
+const std::function<double(double)> af_sig = [](double value_) {
+    // https://en.wikipedia.org/wiki/Sigmoid_function
+    double e_pow_neg_x = pow(e,-value_);
+    return (1.0-e_pow_neg_x)/(1.0+e_pow_neg_x);
+};
+// sigmoid activation function
+// range: 0 < x < 1
+const std::function<double(double)> af_sig01 = [](double value_) {
+    // https://en.wikipedia.org/wiki/Sigmoid_function
+    return 1.0/(1.0+pow(e,-value_));
+};
 
 class Layer {
     
