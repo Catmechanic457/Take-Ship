@@ -12,24 +12,26 @@
 // Special thanks to the CS department - Rooms 13 & 14
 const unsigned file_signature = 0x43531314;
 
-const double e = 2.718281828459045;
+const double e_ = 2.718281828459045;
+
+// NOTE - These functions do not need to be pointers, but it seems to cause undefined behavior when they're not pointers
 
 // linear activation function
 // range: x ∈ R
-const std::function<double(double)> af_linear = [](double value_) {return value_;};
+const auto af_linear = new std::function([](double value_) {return value_;});
 // sigmoid activation function
 // range: -1 < x < 1
-const std::function<double(double)> af_sig = [](double value_) {
+const auto af_sig = new std::function([](double value_) {
     // https://en.wikipedia.org/wiki/Sigmoid_function
-    double e_pow_neg_x = pow(e,-value_);
+    double e_pow_neg_x = pow(e_,-value_);
     return (1.0-e_pow_neg_x)/(1.0+e_pow_neg_x);
-};
+});
 // sigmoid activation function
 // range: 0 < x < 1
-const std::function<double(double)> af_sig01 = [](double value_) {
+const auto af_sig01 = new std::function([](double value_) {
     // https://en.wikipedia.org/wiki/Sigmoid_function
-    return 1.0/(1.0+pow(e,-value_));
-};
+    return 1.0/(1.0+pow(e_,-value_));
+});
 
 class Layer {
     
@@ -42,9 +44,10 @@ class Layer {
     std::vector<double> bias;
     std::vector<double> weight;
 
-    std::function<double(double)> activation_function;
+    // pointer to the activation function
+    std::function<double(double)>* activation_function;
 
-    Layer(unsigned node_count_, unsigned input_count_, std::function<double(double)> af_ = af_linear) :
+    Layer(unsigned node_count_, unsigned input_count_, std::function<double(double)>* af_ = af_linear) :
     node_count(node_count_), input_node_count(input_count_), bias(node_count_, 0.0), weight(node_count_ * input_count_, 0.0), activation_function(af_)
     {}
     /**
@@ -68,7 +71,7 @@ class Layer {
         }
         for (unsigned i = 0; i < node_count; i++) {
             // apply bias and activation function
-            output[i] = activation_function(output[i] += bias[i]);
+            output[i] = (*activation_function)(output[i] += bias[i]);
         }
         return output;
     }
@@ -77,8 +80,10 @@ class Layer {
 struct NeuralNetwork {
 
     std::vector<Layer> layers;
+    unsigned input_count;
+    unsigned output_count;
 
-    NeuralNetwork(std::vector<unsigned> shape_) {
+    NeuralNetwork(std::vector<unsigned> shape_) : input_count(shape_[0]), output_count(shape_[shape_.size()-1]) {
         unsigned incoming_input_count = shape_[0];
         for (unsigned i = 1; i < shape_.size(); i++) {
             Layer layer(shape_[i], incoming_input_count);
@@ -93,7 +98,7 @@ struct NeuralNetwork {
     */
     std::vector<double>calculate(std::vector<double>& input_) {
         std::vector<double> output = input_;
-        for (auto layer : layers) {
+        for (auto& layer : layers) {
             output = layer.calculate(output);
         }
         return output;

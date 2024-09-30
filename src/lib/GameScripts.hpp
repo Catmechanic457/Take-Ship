@@ -7,6 +7,7 @@
 #include <SFML/Graphics.hpp>
 #include "Noise.hpp"
 #include "RenderScripts.hpp"
+#include "NeuralNetwork.hpp"
 
 #define EULERS_NUM 2.718281828459
 
@@ -685,20 +686,98 @@ namespace game {
         Projectile(render::Scene& parent_scene_, rs::Vector2<double> hit_box_, double base_health_ = 1.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.05, double elasticity_ = 0.4) :
         ComplexEntity(parent_scene_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
         {}
-        Projectile(render::Scene& parent_scene_, ObjectFile files_, rs::Vector2<double> hit_box_, double base_health_ = 1.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.05, double elasticity_ = 0.4) :
+        Projectile(render::Scene& parent_scene_, ObjectFile files_, rs::Vector2<double> hit_box_, double base_health_ = 1.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.05, double elasticity_ = 0.0) :
         ComplexEntity(parent_scene_, files_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
         {}
         double r_collision_grace = 0.25;
         double r_flight_time;
         void kill() override {r_flight_time = 0;}
     };
-
-    struct HostileController {
-        virtual void action(HostileEntity& entity) = 0;
+    struct Action {
+        rs::Vector2<double> force;
+        std::vector<unsigned> weapon_fires;
     };
-    struct ControlledHostile {
-        HostileEntity* entity;
-        HostileController* controller;
+    struct HostileController : HostileEntity {
+        HostileController(render::Scene& parent_scene_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        HostileEntity(parent_scene_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        {}
+        HostileController(render::Scene& parent_scene_, ObjectFile files_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        HostileEntity(parent_scene_, files_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        {}
+        virtual Action action() = 0;
+    };
+    struct EnemyController : HostileController {
+        NeuralNetwork network;
+        game::Stage& stage;
+        HostileEntity* target;
+        
+
+        double motor_force = 2000.0;
+
+        // The number of distance measurements taken
+        unsigned radar_probe_count = 16;
+        double radar_range = 100.0;
+        double radar_resolution = 2.0;
+
+        EnemyController(NeuralNetwork network_, game::Stage& parent_stage_, render::Scene& parent_scene_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        network(network_), stage(parent_stage_), HostileController(parent_scene_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        {}
+        EnemyController(NeuralNetwork network_, game::Stage& parent_stage_, render::Scene& parent_scene_, ObjectFile files_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        network(network_), stage(parent_stage_),  HostileController(parent_scene_, files_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
+        {}
+        double get_distance(rs::Position pos_) {
+            double dx = cos(pos_.rotation);
+            double dy = sin(pos_.rotation);
+            for (unsigned i = 0; i < radar_range / radar_resolution; i++) {
+                if (stage.collision(pos_.position)) {return radar_resolution*i;}
+                pos_.position.x += dx * radar_resolution;
+                pos_.position.y += dy * radar_resolution;
+            }
+            return radar_range;
+        }
+        Action action() {
+            std::vector<double> nn_input;
+            // push back radar readings
+            for (unsigned i = 0; i < radar_probe_count; i++) {
+                double r = 2.0*3.14159*i/radar_probe_count;
+                rs::Position pos;
+                pos.position = position.position;
+                pos.rotation = r;
+                // large distance ~0.0; close distance ~1.0
+                nn_input.push_back(1.0 - get_distance(pos) / radar_range);
+            }
+            // push back target position
+            double dx = target->position.position.x - position.position.x;
+            double dy = target->position.position.y - position.position.y;
+
+            nn_input.push_back((*af_sig)(dx));
+            nn_input.push_back((*af_sig)(dy));
+            
+            // push back weapon cooldowns
+            for (auto& weapon : weapons) {
+                // weapon ready = 1; weapon on cooldown = 0
+                nn_input.push_back(weapon.current_cooldown <= 0.0 ? 1.0 : 0.0);
+            }
+            auto output = network.calculate(nn_input);
+
+            // build action
+
+            Action action;
+
+            double f_x = output[0];
+            double f_y = output[1];
+
+            double a = sqrt(f_x*f_x + f_y*f_y);
+            action.force.x = (f_x*motor_force)/a;
+            action.force.y = (f_y*motor_force)/a;
+
+            for (unsigned i = 0; i < weapons.size(); i++) {
+                if (output[i+2] > 0.0) {
+                    action.weapon_fires.push_back(i);
+                }
+            }
+            return action;
+        }
     };
 
     class ForestGenerator : public noise::Noise {
@@ -820,13 +899,10 @@ namespace game {
         std::vector<ComplexEntity*> mobiles;
 
         // stores a reference to every enemy on the scene
-        std::vector<ComplexEntity*> enemies;
+        std::vector<EnemyController*> enemies;
 
         // stores a reference to every projectile on the scene
         std::vector<Projectile*> projectiles;
-
-        // stores the controller object for each controlled mobile
-        std::vector<ControlledHostile*> controlled_hostiles;
         /**
          * \brief Add an entity to the scene
         */
@@ -920,7 +996,7 @@ namespace game {
         HostileEntity* create_player() {
 
             // create a new player
-            player_ship = new HostileEntity(scene, assets::object_file::player_ship, rs::Vector2(32.0,32.0), 50, 3, 75, 0.4, 0.8);
+            player_ship = new HostileEntity(scene, assets::object_file::player_ship, rs::Vector2(32.0,32.0), 100, 3, 75, 0.4, 0.8);
 
             // define left and right weapons
             Weapon player_cannon_left, player_cannon_right;
@@ -961,16 +1037,39 @@ namespace game {
             create_player();
             add_entity(player_ship);
 
-            // TODO - create the controller objects
+            NeuralNetwork tank_net({18,2});
+            tank_net.load_from_file("../data/neural_network/tank_18_2.bin");
+            tank_net.layers[0].activation_function = af_sig;
 
             // create 3 tanks
             for (unsigned i = 0; i < 3; i++) {
-                enemies.push_back(new HostileEntity(scene, assets::object_file::tank, rs::Vector2(32.0,32.0), 150, 4, 145, 0.4, 0.4));
+                auto e = new EnemyController(tank_net, stage, scene, assets::object_file::tank, rs::Vector2(32.0,32.0), 150, 4, 145, 0.4, 0.4);
+                e->target = player_ship;
+                enemies.push_back(e);
             }
+
+            NeuralNetwork sniper_net({19,3});
+            sniper_net.load_from_file("../data/neural_network/sniper_19_3.bin");
+            sniper_net.layers[0].activation_function = af_sig;
 
             // create 3 snipers
             for (unsigned i = 0; i < 3; i++) {
-                enemies.push_back(new HostileEntity(scene, assets::object_file::sniper, rs::Vector2(32.0,32.0), 75, 1, 80, 0.4, 0.8));
+                auto e = new EnemyController(sniper_net, stage, scene, assets::object_file::sniper, rs::Vector2(32.0,32.0), 75, 1, 80, 0.4, 0.8);
+                e->target = player_ship;
+                // define left and right weapons
+                Weapon sniper_cannon;
+
+                // use left cannon to define properties
+                sniper_cannon.base_cooldown = 2.0;
+                sniper_cannon.launch_velocity = 250.0;
+                sniper_cannon.flight_time = 3.0;
+                sniper_cannon.origin.position.x = 12.0;
+                sniper_cannon.origin.position.y = 0.0;
+                sniper_cannon.origin.rotation = 270.0;
+
+                e->weapons.push_back(sniper_cannon);
+
+                enemies.push_back(e);
             }
 
             // push all enemies onto the mobile array
@@ -1078,6 +1177,8 @@ namespace game {
 
             projectile_->position.position.x = x;
             projectile_->position.position.y = y;
+            // TODO - This is the wrong equation, something else is correcting it
+            // Correct equation has x = cos and y = sin
             projectile_->velocity.x = i + (sin(-r) * v);
             projectile_->velocity.y = j + (cos(-r) * v);
 
@@ -1091,9 +1192,9 @@ namespace game {
          * \param t_ time elapsed
         */
         void step_projectiles(double t_) {
-            // this could be optimized by sorting by least remaining time, etc.
-            for (unsigned i = 0; i < projectiles.size(); i++) {
-                auto* e = projectiles[i];
+            // iterate backwards to avoid index issues when item removed
+            for (unsigned i = projectiles.size(); i > 0; i--) {
+                auto* e = projectiles[i-1];
 
                 e->r_collision_grace -= t_;
                 e->can_collide = e->r_collision_grace < 0.0;
@@ -1102,12 +1203,10 @@ namespace game {
                 if (e->r_flight_time <= 0.0) {
 
                     // kill only if not already dead
-                    if (e->health > 0.0) {kill_mobile(e);};
+                    if (!e->is_killed()) {kill_mobile(e);};
 
-                    projectiles.erase(projectiles.begin()+i);
+                    projectiles.erase(projectiles.begin()+i-1);
                     delete e; // we can be sure the projectile is no longer needed
-                    
-                    i--; // reduce i by one since array size has changed
                 }
             }
         }
@@ -1153,6 +1252,23 @@ namespace game {
                 }
             }
         }
+        /**
+         * \brief Get input from the AI to control enemies
+        */
+        void enemy_input() {
+            for (auto& e : enemies) {
+                Action action = e->action();
+                e->resultant_force = action.force;
+                for (auto& i : action.weapon_fires) {
+                    if (e->try_fire(i)) {
+                        // allocate memory for a new cannonball
+                        auto* new_cannonball = new Projectile(scene, assets::object_file::cannonball, rs::Vector2(4,4), 1, 0, 20, 0.15, 0);
+                        add_entity(new_cannonball);
+                        launch_projectile(e, i, new_cannonball);
+                    }
+                }
+            }
+        }
         public:
         GameHandler(render::Scene& scene_, game::Stage& stage_) :
         scene(scene_),
@@ -1180,6 +1296,7 @@ namespace game {
             scene.set_camera(player_ship->position.position);
             
             player_input();
+            enemy_input();
 
             handle_collisions();
             move_mobiles(time_elapsed_);
@@ -1187,7 +1304,10 @@ namespace game {
             remove_killed_mobiles();
 
             step_projectiles(time_elapsed_);
+
+            // TODO move to its own function:
             update_weapon_cooldowns(player_ship, time_elapsed_);
+            for (auto& e : enemies) {update_weapon_cooldowns(e, time_elapsed_);}
         }
     };
 }
