@@ -478,7 +478,8 @@ namespace game {
         public:
 
         double health;
-        bool can_collide = true;
+        bool entity_collide = true;
+        bool stage_collide = true;
         rs::Vector2<double> velocity;
         // the resultant force currently applied to spire
         // excludes force from drag
@@ -706,7 +707,7 @@ namespace game {
         {}
         virtual Action action() = 0;
     };
-    struct EnemyController : HostileController {
+    struct Enemy : HostileController {
         NeuralNetwork network;
         game::Stage& stage;
         HostileEntity* target;
@@ -719,10 +720,10 @@ namespace game {
         double radar_range = 100.0;
         double radar_resolution = 2.0;
 
-        EnemyController(NeuralNetwork network_, game::Stage& parent_stage_, render::Scene& parent_scene_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        Enemy(NeuralNetwork network_, game::Stage& parent_stage_, render::Scene& parent_scene_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
         network(network_), stage(parent_stage_), HostileController(parent_scene_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
         {}
-        EnemyController(NeuralNetwork network_, game::Stage& parent_stage_, render::Scene& parent_scene_, ObjectFile files_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
+        Enemy(NeuralNetwork network_, game::Stage& parent_stage_, render::Scene& parent_scene_, ObjectFile files_, rs::Vector2<double> hit_box_, double base_health_ = 100.0, double armor_ = 0.0, double mass_ = 100.0, double drag_coeff_ = 0.2, double elasticity_ = 1.0) :
         network(network_), stage(parent_stage_),  HostileController(parent_scene_, files_, hit_box_, base_health_, armor_, mass_, drag_coeff_, elasticity_)
         {}
         double get_distance(rs::Position pos_) {
@@ -851,7 +852,7 @@ namespace game {
         /**
          * \brief Handle a *known* collision between two entities
          * \param e1_ Entity 1
-         * \param e1_ Entity 2
+         * \param e2_ Entity 2
         */
         static void handle_collision(ComplexEntity& e1_, ComplexEntity& e2_) {
             // momentum of e1
@@ -887,6 +888,73 @@ namespace game {
             e2_.velocity.x = m4x / e2_.get_mass();
             e2_.velocity.y = m4y / e2_.get_mass();
         }
+        /**
+         * \brief Handle a *known* collision between an entity and its stage
+         * \param e1_ Entity
+         * \param stage_ Stage
+        */
+        static void handle_collision(ComplexEntity& e1_, Stage& stage_) {
+
+            auto entity_pos = e1_.position.position;
+
+            // create a circle slightly larger than the entity hitbox
+            double r = std::max<double>(e1_.get_hitbox().x, e1_.get_hitbox().y)/2.0;
+            r+=2.0;
+
+            double _2pi = 2*3.14159;
+
+            double angle;
+
+            // try to find where this circle and the stage boundaries form a tangent
+
+            // rotate a line about the circle for 100 steps
+            for(double a1 = 0.0; a1 < _2pi; a1+=_2pi/100.0) {
+
+                // calculate line vector
+                double i = r*cos(a1);
+                double j = r*sin(a1);
+
+                // check if coordinates are in a boundary
+                if (stage_.collision(rs::Vector2(entity_pos.x + i, entity_pos.y + j))) {
+                    // still only rotate until 2 pi, since we don't want vectors to cross eachother
+                    for(double a2 = a1; a2 < _2pi + a1; a2+=_2pi/100.0) {
+
+                        // calculate line vector
+                        double i = r*cos(a2);
+                        double j = r*sin(a2);
+
+                        // check if coordinates have left the boundary
+                        if (!stage_.collision(rs::Vector2(entity_pos.x + i, entity_pos.y + j))) {
+                            // bisect the two vectors
+                            angle = (a1 + a2)/2.0 + 3.14159/2.0;
+                            goto calc_collide;
+                        }
+                    }
+                }
+            }
+            // if no tangent was found, return
+            return;
+            calc_collide:
+
+            auto v1 = e1_.velocity;
+            // incoming angle
+            double a1 = atan2(v1.y, v1.x);
+            // reflected angle
+            double a2 = 2*(angle - a1);
+
+            // rotate velocity vector by double the tangent angle
+            double i = v1.x*cos(a2) - v1.y*sin(a2);
+            double j = v1.x*sin(a2) + v1.y*cos(a2);
+
+            rs::Vector2<double> impulse;
+            impulse.x = cos(angle + (3.14159/2));
+            impulse.y = sin(angle + (3.14159/2));
+
+            bool reverse_impulse = stage_.collision(rs::Vector2(e1_.position.position.x + impulse.x, e1_.position.position.y + impulse.y));
+
+            e1_.velocity.x = i + ((reverse_impulse ? -1.0 : 1.0) * 2.0 * impulse.x);
+            e1_.velocity.y = j + ((reverse_impulse ? -1.0 : 1.0) * 2.0 * impulse.y);
+        }
     };
     class GameHandler {
 
@@ -899,7 +967,7 @@ namespace game {
         std::vector<ComplexEntity*> mobiles;
 
         // stores a reference to every enemy on the scene
-        std::vector<EnemyController*> enemies;
+        std::vector<Enemy*> enemies;
 
         // stores a reference to every projectile on the scene
         std::vector<Projectile*> projectiles;
@@ -942,6 +1010,9 @@ namespace game {
             t_mobile_->health = 0.0;
             scene.remove_drawable(t_mobile_);
             remove_mobile(t_mobile_);
+            // if in enemies, remove it
+            // TODO there's definitely a better way to do this
+            enemies.erase(std::remove(enemies.begin(), enemies.end(), t_mobile_), enemies.end());
             t_mobile_->kill(); // mobile may be left undeleted
         }
         /**
@@ -949,12 +1020,18 @@ namespace game {
         */
         void handle_collisions() {
             // for all mobiles
-            // note - last mobile is skipped as all pairs will already be exhausted
-            for (unsigned i = 0; i < mobiles.size() - 1; i++) {
-                if (mobiles[i]->can_collide == false) {continue;}
+            for (unsigned i = 0; i < mobiles.size(); i++) {
+                // calculate stage collision
+                auto pos = mobiles[i]->position.position;
+                if (!valid_position(pos.x, pos.y) and mobiles[i]->stage_collide) {
+                    CollisionHandler::handle_collision(*mobiles[i], stage);
+                }
+                // skip last mobile
+                if (i == mobiles.size() - 1) {continue;}
+                if (mobiles[i]->entity_collide == false) {continue;}
                 // check remaining pairs
                 for (auto j = i + 1; j < mobiles.size(); j++) {
-                    if (mobiles[j]->can_collide == false) {continue;}
+                    if (mobiles[j]->entity_collide == false) {continue;}
                     // check for collision
                     if (mobiles[i]->collides_with(mobiles[j]->position.position, mobiles[j]->get_hitbox())) {
                         // handle collision
@@ -1043,7 +1120,7 @@ namespace game {
 
             // create 3 tanks
             for (unsigned i = 0; i < 3; i++) {
-                auto e = new EnemyController(tank_net, stage, scene, assets::object_file::tank, rs::Vector2(32.0,32.0), 150, 4, 145, 0.4, 0.4);
+                auto e = new Enemy(tank_net, stage, scene, assets::object_file::tank, rs::Vector2(32.0,32.0), 350, 6, 45, 0.4, 0.4);
                 e->target = player_ship;
                 enemies.push_back(e);
             }
@@ -1054,7 +1131,7 @@ namespace game {
 
             // create 3 snipers
             for (unsigned i = 0; i < 3; i++) {
-                auto e = new EnemyController(sniper_net, stage, scene, assets::object_file::sniper, rs::Vector2(32.0,32.0), 75, 1, 80, 0.4, 0.8);
+                auto e = new Enemy(sniper_net, stage, scene, assets::object_file::sniper, rs::Vector2(32.0,32.0), 175, 4, 80, 0.4, 0.8);
                 e->target = player_ship;
                 // define left and right weapons
                 Weapon sniper_cannon;
@@ -1078,16 +1155,16 @@ namespace game {
             }
         }
         /**
-         * \return `true` if the given position is a valid spawn for a ship entity
+         * \return `true` if the given position is a valid
         */
-        bool valid_spawn(double x_, double y_) {
+        bool valid_position(double x_, double y_) {
             int check_pattern[9][2] = {
                 {1,1}, {1,0}, {1,-1},
                 {0,1}, {0,0}, {0,-1},
                 {-1,1}, {-1,0}, {-1,-1}
             };
 
-            double scale = 32.0;
+            double scale = 16.0;
 
             // if any point in the check pattern is invalid, spawn is invalid
             for (auto p : check_pattern) {
@@ -1145,7 +1222,7 @@ namespace game {
                     }
 
                     // check valid
-                    if (!valid_spawn(x,y)) {goto try_spawn_enemy;}
+                    if (!valid_position(x,y)) {goto try_spawn_enemy;}
 
                     // ensure there exists a valid path between the enemy and player
                     // this ensures that the enemy is able to reach the player
@@ -1183,8 +1260,9 @@ namespace game {
             projectile_->velocity.y = j + (cos(-r) * v);
 
             projectile_->r_flight_time = weapon.flight_time;
-            projectile_->r_collision_grace = 0.25;
-            projectile_->can_collide = false;
+            projectile_->r_collision_grace = 0.15;
+            projectile_->entity_collide = false;
+            projectile_->stage_collide = false;
             projectiles.push_back(projectile_);
         }
         /**
@@ -1197,7 +1275,7 @@ namespace game {
                 auto* e = projectiles[i-1];
 
                 e->r_collision_grace -= t_;
-                e->can_collide = e->r_collision_grace < 0.0;
+                e->entity_collide = e->r_collision_grace < 0.0;
                 e->r_flight_time -= t_;
 
                 if (e->r_flight_time <= 0.0) {
